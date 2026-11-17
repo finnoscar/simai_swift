@@ -250,6 +250,6 @@ SWIFT
 regression.sub!('// Consumed by tools/test_simai_gameplay.rb against current production sources.',
                 '// Native engine regressions. Compiled by Tools/test_native_regressions.rb.')
 File.write(File.join(regression_dir, 'GameplayRegression.swift'), regression)
-audio_regression = File.read(File.join(source_root, 'Tests/SimaiHitSoundRegressionTests.swift'))
-File.write(File.join(regression_dir, 'AudioRegression.swift'), audio_regression)
+# AudioRegression.swift is maintained here with offline completion markers.
+# Its waveform expectations are evaluated against the exported engine above.
 puts "Exported #{source_files.length} native source files"

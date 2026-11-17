@@ -5,7 +5,7 @@ on:
 permissions:
   contents: read
 jobs:
-  native:
+  native-tests:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7.0.1
@@ -15,6 +15,12 @@ jobs:
         run: swift test
       - name: Native gameplay and offline audio regressions
         run: ruby Tools/test_native_regressions.rb
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - name: iOS Simulator library
         run: xcodebuild -scheme SimaiSwift -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/simai-swift-library CODE_SIGNING_ALLOWED=NO build -quiet
       - name: Example application

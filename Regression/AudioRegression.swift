@@ -1,4 +1,4 @@
-// Compiled alongside the actual engine by tools/test_simai_audio.rb. All audio
+// Compiled alongside the actual engine by Tools/test_native_regressions.rb. All audio
 // is rendered offline into memory; no speaker, microphone or account is used.
 extension SimaiHitSoundEngine {
     static func offlineGainRegression() throws -> String {
@@ -39,7 +39,31 @@ extension SimaiHitSoundEngine {
                 expectedEnergy += sample * sample
             }
             sound.playPreparedSound(cue, volume: gain)
-            let rendered = try render(frames: max(24_000, Int(source.frameLength) + 4096))
+            let voice = sound.players[(sound.cursor - 1) % sound.players.count]
+            guard voice.volume == 1 else { throw CocoaError(.fileReadUnknown) }
+            // Offline rendering can advance faster than the player's command
+            // queue. A data-rendered marker waits for the actual cue and keeps
+            // its samples inside this check when a VM delays scheduling.
+            let marker = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1)!
+            marker.frameLength = 1
+            marker.floatChannelData![0][0] = 0
+            let completion = DispatchSemaphore(value: 0)
+            voice.scheduleBuffer(marker, completionCallbackType: .dataRendered) { _ in completion.signal() }
+            var rendered = (peak: 0.0, energy: 0.0)
+            var completed = false
+            for _ in 0..<240 {
+                let block = try render(frames: 1024)
+                rendered.peak = max(rendered.peak, block.peak)
+                rendered.energy += block.energy
+                if completion.wait(timeout: .now() + .milliseconds(1)) == .success {
+                    completed = true
+                    break
+                }
+            }
+            guard completed else { throw CocoaError(.fileReadUnknown) }
+            let tail = try render(frames: 4096)
+            rendered.peak = max(rendered.peak, tail.peak)
+            rendered.energy += tail.energy
             checks += 1
             if abs(rendered.peak - expectedPeak) > max(0.000_001, expectedPeak * 0.001)
                 || abs(rendered.energy - expectedEnergy) > max(0.000_001, expectedEnergy * 0.001) {
