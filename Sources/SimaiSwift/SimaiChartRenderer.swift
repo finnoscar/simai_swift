@@ -376,7 +376,7 @@ public struct SimaiChartRenderer: View {
     {
         let progress = 1 - (event.time - renderTime) / max(settings.approachTime, 0.001)
         let motion = SimaiNoteMotion.ringState(progress: progress)
-        let currentRadius = radius * motion.radius
+        let currentRadius = radius * CGFloat(motion.radius)
         let scale = CGFloat(motion.scale)
         let mirrored = settings.mirror.map(location: event.location)
         let angle = SimaiSlidePathGeometry.angle(for: mirrored)

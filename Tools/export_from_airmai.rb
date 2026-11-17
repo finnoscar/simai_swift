@@ -186,6 +186,8 @@ source_files['SimaiPreviewHitSoundController.swift'] = preview_sound
 renderer.gsub!('AIRMAI_GAMEPLAY_METRICS', 'SIMAI_SWIFT_GAMEPLAY_METRICS')
 renderer.gsub!('Airmai gameplay %@', 'SimaiSwift gameplay %@')
 renderer.gsub!('com.airmai.simai-hit-sound', 'org.simai.swift.hit-sound')
+replace!(renderer, 'let currentRadius = radius * motion.radius',
+         'let currentRadius = radius * CGFloat(motion.radius)')
 toolchain = IO.popen(%w[xcrun --find swiftc], &:read).strip
 host = File.expand_path('../lib/swift/host', File.dirname(toolchain))
 sdk = IO.popen(%w[xcrun --sdk macosx --show-sdk-path], &:read).strip
@@ -218,7 +220,8 @@ manifest = {
     'Generic missing-chart error message and explicit public initializers',
     'Playback settings extracted without app preferences or app-specific UI',
     'Local-file playback replaces source-specific fetching, with cancellation generations and a weak display-link proxy',
-    'Explicit renderer and UIKit input initializers, and the existing preview sound scheduler'
+    'Explicit renderer and UIKit input initializers, and the existing preview sound scheduler',
+    'Explicit CGFloat conversion for cross-toolchain renderer compatibility'
   ]
 }
 File.write(File.join(package_root, 'SOURCE_PROVENANCE.json'), JSON.pretty_generate(manifest) + "\n")

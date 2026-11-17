@@ -30,6 +30,7 @@
     "Generic missing-chart error message and explicit public initializers",
     "Playback settings extracted without app preferences or app-specific UI",
     "Local-file playback replaces source-specific fetching, with cancellation generations and a weak display-link proxy",
-    "Explicit renderer and UIKit input initializers, and the existing preview sound scheduler"
+    "Explicit renderer and UIKit input initializers, and the existing preview sound scheduler",
+    "Explicit CGFloat conversion for cross-toolchain renderer compatibility"
   ]
 }
