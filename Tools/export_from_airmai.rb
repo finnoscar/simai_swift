@@ -231,6 +231,22 @@ regression = File.read(File.join(source_root, 'Tests/SimaiGameplayRegressionTest
 app_result_tests = section(regression, '        let result = AirMaiDXPlayResult(', '        let bus = GameplayEventBus()')
 replace!(regression, app_result_tests, '')
 regression.gsub!('Coyote hardware events', 'framework events')
+replace!(regression, 'let reference = [CGPoint(x: -18.5 / 300',
+         'let vertices: [CGPoint] = [CGPoint(x: -18.5 / 300')
+replace!(regression, <<~SWIFT.strip, <<~SWIFT.strip)
+  CGPoint(x: 1.5 / 300, y: 0)].map { point in
+                                  CGPoint(x: sample.point.x + point.x * cos(sample.angle) - point.y * sin(sample.angle),
+                                          y: sample.point.y + point.x * sin(sample.angle) + point.y * cos(sample.angle))
+                              }
+SWIFT
+  CGPoint(x: 1.5 / 300, y: 0)]
+                          let cosine = CoreGraphics.cos(sample.angle)
+                          let sine = CoreGraphics.sin(sample.angle)
+                          let reference = vertices.map { point -> CGPoint in
+                              CGPoint(x: sample.point.x + point.x * cosine - point.y * sine,
+                                      y: sample.point.y + point.x * sine + point.y * cosine)
+                          }
+SWIFT
 regression.sub!('// Consumed by tools/test_simai_gameplay.rb against current production sources.',
                 '// Native engine regressions. Compiled by Tools/test_native_regressions.rb.')
 File.write(File.join(regression_dir, 'GameplayRegression.swift'), regression)

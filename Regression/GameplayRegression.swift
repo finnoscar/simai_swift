@@ -207,12 +207,15 @@ struct SimaiGameplayRegressionTests {
                     var index = 0
                     while distance < branch.length {
                         let sample = branch.sample(distance: distance)
-                        let reference = [CGPoint(x: -18.5 / 300, y: -20 / 300), CGPoint(x: -1.5 / 300, y: -20 / 300),
+                        let vertices: [CGPoint] = [CGPoint(x: -18.5 / 300, y: -20 / 300), CGPoint(x: -1.5 / 300, y: -20 / 300),
                             CGPoint(x: 18.5 / 300, y: 0), CGPoint(x: -1.5 / 300, y: 20 / 300),
-                            CGPoint(x: -18.5 / 300, y: 20 / 300), CGPoint(x: 1.5 / 300, y: 0)].map { point in
-                                CGPoint(x: sample.point.x + point.x * cos(sample.angle) - point.y * sin(sample.angle),
-                                        y: sample.point.y + point.x * sin(sample.angle) + point.y * cos(sample.angle))
-                            }
+                            CGPoint(x: -18.5 / 300, y: 20 / 300), CGPoint(x: 1.5 / 300, y: 0)]
+                        let cosine = CoreGraphics.cos(sample.angle)
+                        let sine = CoreGraphics.sin(sample.angle)
+                        let reference = vertices.map { point -> CGPoint in
+                            CGPoint(x: sample.point.x + point.x * cosine - point.y * sine,
+                                    y: sample.point.y + point.x * sine + point.y * cosine)
+                        }
                         var actual: [CGPoint] = []
                         branch.slideArrows[index].cgPath.applyWithBlock { element in
                             if element.pointee.type == .moveToPoint || element.pointee.type == .addLineToPoint {
