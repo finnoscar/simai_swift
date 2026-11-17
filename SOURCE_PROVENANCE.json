@@ -1,0 +1,35 @@
+{
+  "extracted_at": "2026-11-17",
+  "upstream_reference": "Project-Fukakai/simai_flutter@f15acddffc6a43d0c0f74beeb91fc282fcb9bf2c",
+  "source_files": [
+    {
+      "path": "MaimaiScoreTracker/Services/Models/SimaiChartModels.swift",
+      "sha256": "d862a97211d19d0481433dc104e910ed381122a1310319a5e0bdfba676018ce2"
+    },
+    {
+      "path": "MaimaiScoreTracker/Views/SimaiChartRenderer.swift",
+      "sha256": "4364d8f66ed1683aa4d7e133dc81e801e45902a137b43396771cbe52888b23b7"
+    },
+    {
+      "path": "MaimaiScoreTracker/Views/SimaiChartExperienceView.swift",
+      "sha256": "0b26451f9c244cb4d439dcb2eb89f7962ca79f06c520f12feff23455c03489d2"
+    },
+    {
+      "path": "MaimaiScoreTracker/Coyote/GameplayEvent.swift",
+      "sha256": "054e88d2abe4b5120038c9aa91f57b666820d57aaac1bd1a2938f0e3fdb77d81"
+    },
+    {
+      "path": "MaimaiScoreTracker/Coyote/GameplayEventBus.swift",
+      "sha256": "248a2c08db18e5edd6b838261ae848d92bfcd5a0d6a4f77e0d964e8ca5d7e432"
+    }
+  ],
+  "adaptations": [
+    "Public Swift access control for reusable types and their existing members",
+    "UIKit touch surface compiled only on UIKit platforms",
+    "Caller-supplied answer audio with a synthesized default",
+    "Generic missing-chart error message and explicit public initializers",
+    "Playback settings extracted without app preferences or app-specific UI",
+    "Local-file playback replaces source-specific fetching, with cancellation generations and a weak display-link proxy",
+    "Explicit renderer and UIKit input initializers, and the existing preview sound scheduler"
+  ]
+}
