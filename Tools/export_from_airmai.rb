@@ -213,6 +213,14 @@ manifest = {
   'extracted_at' => '2026-11-17',
   'upstream_reference' => 'Project-Fukakai/simai_flutter@f15acddffc6a43d0c0f74beeb91fc282fcb9bf2c',
   'source_files' => paths.map { |name, path| { 'path' => path, 'sha256' => Digest::SHA256.hexdigest(inputs.fetch(name)) } },
+  'manual_components' => [
+    {
+      'component' => 'SimaiPreviewTimeline',
+      'source_symbol' => 'SimaiDetailedTimeline',
+      'source_path' => paths.fetch('experience'),
+      'adaptations' => 'Public initializer, standalone contrast and accessibility; no Airmai-specific styling helpers.'
+    }
+  ],
   'adaptations' => [
     'Public Swift access control for reusable types and their existing members',
     'UIKit touch surface compiled only on UIKit platforms',

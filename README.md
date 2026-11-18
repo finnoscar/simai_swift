@@ -1,6 +1,6 @@
 # simai_swift
 
-[![Swift](https://github.com/hhlfinn/simai_swift/actions/workflows/ci.yml/badge.svg)](https://github.com/hhlfinn/simai_swift/actions/workflows/ci.yml)
+[![Swift](https://github.com/finnoscar/simai_swift/actions/workflows/ci.yml/badge.svg)](https://github.com/finnoscar/simai_swift/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
 
 原生 Swift 的 simai 谱面解析、渲染与游玩框架，抽取自 Airmai 的谱面引擎。
@@ -14,6 +14,7 @@ A native Swift package for parsing, rendering, and playing simai charts. Extract
 - UIKit 多指与合并触摸采样，按触摸时间戳进行判定。
 - 独立的音符头与滑条计分、Critical Perfect、BREAK 加分、DX 分、连击与 FAST/LATE。
 - 本地音频播放、暂停、定位及音频设备时钟同步。
+- Airmai 的预览时间轴：按音符类型显示密度、小节和原谱记法，支持点击与拖动定位。
 - 速度、镜像、时序偏移、特效和音量设置，支持自定义宿主界面。
 - 独立事件流与不可变结算快照，供宿主接入自己的业务。
 - 合成音效和原创演示谱面，可直接运行示例。
@@ -22,8 +23,8 @@ A native Swift package for parsing, rendering, and playing simai charts. Extract
 
 | 平台 | 最低版本 | 提供的能力 |
 | --- | --- | --- |
-| iOS / iPadOS | 16.0 | 解析、渲染、多指游玩、本地音频播放器 |
-| macOS | 13.0 | 解析、路径几何、Canvas 渲染、判定引擎和离线测试 |
+| iOS / iPadOS | 16.0 | 解析、渲染、多指游玩、本地音频播放器与预览时间轴 |
+| macOS | 13.0 | 解析、路径几何、Canvas 渲染、独立时间轴、判定引擎和离线测试 |
 
 Package 使用 Swift tools 5.9 和 Swift 5 语言模式。当前本地验证使用 Xcode 27 / Swift 6.4，其他工具链由 CI 持续验证。
 
@@ -34,7 +35,7 @@ Package 使用 Swift tools 5.9 和 Swift 5 语言模式。当前本地验证使�
 也可以在 `Package.swift` 中添加依赖。
 
 ```swift
-.package(url: "https://github.com/hhlfinn/simai_swift.git", from: "0.1.0")
+.package(url: "https://github.com/finnoscar/simai_swift.git", from: "0.2.0")
 ```
 
 在目标的 `dependencies` 中添加产品。
@@ -71,7 +72,7 @@ let master = try SimaiChartParser.parse(maidata: text, levelIndex: 3)
 
 ### 2. 预览与播放
 
-iOS / iPadOS 宿主可以直接使用原生播放器。音频 URL 应当是可读取的本地文件，文件生命周期由宿主管理。
+iOS / iPadOS 宿主可以直接使用原生播放器。传入同一份谱面配套的本地音频文件；文件生命周期由宿主管理。`.preview` 自动显示时间轴，拖动时暂停音频，松手后定位一次；只有拖动前正在播放时才会续播。
 
 ```swift
 import SimaiSwift
@@ -105,6 +106,8 @@ controller.stop()
 
 准备失败后通过 `errorMessage` 查看错误，内置界面提供重试。连续准备或在准备期间停止时，旧任务通过代次标识失效。
 
+**默认不用设置延迟。** 使用 `parse(maidata:levelIndex:)` 会自动应用谱面内的 `first_N`（优先）或 `first`，不用再次偏移。若直接解析原始表达式，则由宿主在 `offset:` 传入该表达式对应的谱面偏移。内置播放器沿用 Airmai 的音频设备时钟与输出延迟补偿（取 85 ms 与系统所报输出延迟加 I/O 缓冲时长中的较大值，切换音频路由时更新）。时间轴和画面读取同一显示时钟；手动偏移默认均为 `0`。不匹配的音频或错误的谱面偏移不会被自动纠正，特殊外接音频路由的实际延迟也可能需要单独验证。
+
 ### 3. 游玩与结算
 
 ```swift
@@ -121,14 +124,12 @@ SimaiPlayerView(controller: controller, mode: .gameplay) { result in
 ```swift
 controller.settings.noteSpeed = 8
 controller.settings.mirror = .leftRight
-controller.settings.audioTimingOffset = 0.020
-controller.settings.visualTimingOffset = 0
 controller.settings.musicVolume = 0.7
 controller.settings.hitSoundVolume = 0.2
 controller.settings.showEffects = true
 ```
 
-时序偏移的单位为秒。默认音频设备管线补偿继承自原生引擎，具体设备和音频路由需要实际校准。模拟器测试覆盖逻辑和渲染构建，真机触摸到音频的端到端延迟需另行测量。
+`audioTimingOffset` 和 `visualTimingOffset` 是可选的高级校准设置，单位为秒，通常保留默认值。
 
 ### 4. 自定义渲染和输入
 
@@ -136,6 +137,29 @@ controller.settings.showEffects = true
 
 ```swift
 SimaiChartRenderer(chart: chart, currentTime: time, settings: settings)
+```
+
+也可以独立嵌入公开的 `SimaiPreviewTimeline`。下例仅替换 UI，仍由内置控制器负责音频和定位；自建播放器（例如 macOS 宿主）需提供自己的同步显示时间与拖动回调。
+
+```swift
+@MainActor
+struct ChartTimeline: View {
+    let chart: SimaiChart
+    let controller: SimaiPlayerController
+    @ObservedObject private var clock: SimaiPlaybackClock
+
+    init(chart: SimaiChart, controller: SimaiPlayerController) {
+        self.chart = chart
+        self.controller = controller
+        self.clock = controller.clock
+    }
+
+    var body: some View {
+        SimaiPreviewTimeline(chart: chart, currentTime: clock.currentTime,
+                             onScrub: controller.scrub(to:),
+                             onScrubEnded: controller.finishScrubbing(at:))
+    }
+}
 ```
 
 需要自定义游玩界面时，可以组合 `SimaiGameplaySession`、`SimaiMultiTouchSurface` 和渲染器。触摸点使用判定圆归一化坐标，圆心为 `(0, 0)`，外圈半径为 `1`。`SimaiMultiTouchSurface` 会完成 UIKit 坐标换算。
@@ -188,6 +212,7 @@ task.cancel()
 | `SimaiMultiTouchSurface` | 多指输入、合并采样与坐标转换 |
 | `SimaiGameplaySession` | 判定、独立计分槽与成绩状态 |
 | `SimaiPlayerController` / `SimaiPlaybackClock` | 本地音频和显示时间映射 |
+| `SimaiPreviewTimeline` | 音符密度、小节、原谱与拖动定位 |
 | `GameplayEventBus` | 实时事件订阅 |
 
 判定与计分的实现说明见 [GAMEPLAY.md](GAMEPLAY.md)。
@@ -204,7 +229,7 @@ xcodebuild -scheme SimaiSwift \
 
 公开 API 测试覆盖原始表达式、maidata 难度、音符标记、路径、真实触摸输入和事件总线。原生回归覆盖滑条轨迹、端点交接、合并采样、HOLD、BREAK/DX 计分、运动边界及离线音效增益。
 
-`SOURCE_PROVENANCE.json` 记录抽取时的框架源码哈希。维护者可使用 `Tools/export_from_airmai.rb` 对允许列表内的引擎文件重新抽取。生成工具使用 Xcode 自带的 SwiftSyntax，运行时包通过 Apple 系统框架工作。
+`SOURCE_PROVENANCE.json` 记录抽取时的框架源码哈希。维护者可使用 `Tools/export_from_airmai.rb` 对允许列表内的引擎文件重新抽取。预览时间轴由 Swift 包手动维护；发布前可运行 `ruby Tools/check_airmai_preview_parity.rb /path/to/airmai`，对照 App 的谱面偏移、播放时钟、拖动定位、时间轴绘制和提示音调度代码。脚本只读，不输出 App 源码。iOS 模拟器测试另覆盖播放前后拖动与继续播放；不测量真机音频的端到端延迟。
 
 欢迎提交 Issue 和 Pull Request。报告判定问题时请提供最小 simai 表达式、设置、预期结果和可复现的时间戳序列。
 

@@ -52,6 +52,11 @@ public struct SimaiGameplayResult: Sendable {
             if let chart = controller.chart {
                 SimaiPlayerStage(chart: chart, controller: controller, mode: mode, onComplete: onComplete).id(
                     controller.playbackID)
+                if mode == .preview {
+                    SimaiClockTimeline(
+                        chart: chart, clock: controller.clock, onScrub: controller.scrub(to:),
+                        onScrubEnded: controller.finishScrubbing(at:))
+                }
                 SimaiPlayerTransport(controller: controller, mode: mode)
             } else if let error = controller.errorMessage {
                 Text(error).multilineTextAlignment(.center)
@@ -66,6 +71,18 @@ public struct SimaiGameplayResult: Sendable {
         ) { _ in controller.pause() }.onReceive(controller.$settings) { settings in
             controller.setVolume(settings.musicVolume)
         }
+    }
+}
+
+// Observe frame-by-frame time here, not in the player layout or transport.
+@MainActor private struct SimaiClockTimeline: View {
+    let chart: SimaiChart
+    @ObservedObject var clock: SimaiPlaybackClock
+    let onScrub: (TimeInterval) -> Void
+    let onScrubEnded: (TimeInterval) -> Void
+
+    var body: some View {
+        SimaiPreviewTimeline(chart: chart, currentTime: clock.currentTime, onScrub: onScrub, onScrubEnded: onScrubEnded)
     }
 }
 

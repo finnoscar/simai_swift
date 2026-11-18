@@ -30,6 +30,17 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(late.scale, 1)
     }
 
+    func testMaidataAuthoredTimingWithDefaultPlaybackSettings() throws {
+        let maidata = "&bpm=120\n&first=0.75\n&first_5=1.25\n&inote_2={4}1,2,E\n&inote_5={4}1,2,E"
+        let basic = try SimaiChartParser.parse(maidata: maidata, levelIndex: 0)
+        let master = try SimaiChartParser.parse(maidata: maidata, levelIndex: 3)
+
+        XCTAssertEqual(basic.events.map(\.time), [0.75, 1.25])
+        XCTAssertEqual(master.events.map(\.time), [1.25, 1.75])
+        XCTAssertEqual(SimaiPlaybackSettings().audioTimingOffset, 0)
+        XCTAssertEqual(SimaiPlaybackSettings().visualTimingOffset, 0)
+    }
+
     @MainActor func testPublicTouchInputAndScoring() async throws {
         let chart = try SimaiChartParser.parse(notation: "(120){4}1,2,E", offset: 1)
         let session = SimaiGameplaySession(chart: chart, gameplayEventBus: GameplayEventBus())

@@ -25,3 +25,15 @@ jobs:
         run: xcodebuild -scheme SimaiSwift -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/simai-swift-library CODE_SIGNING_ALLOWED=NO build -quiet
       - name: Example application
         run: xcodebuild -project Examples/Demo/SimaiDemo.xcodeproj -scheme SimaiDemo -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/simai-swift-demo CODE_SIGNING_ALLOWED=NO build -quiet
+      - name: Preview playback and scrubbing
+        run: |
+          simulator_id=$(xcrun simctl list devices available -j | ruby -rjson -e '
+            devices = JSON.parse(STDIN.read).fetch("devices")
+            phone = devices.select { |runtime, _| runtime.include?(".iOS-") }.values.reverse.flatten
+              .find { |device| device.fetch("name").start_with?("iPhone") }
+            abort "No iPhone simulator available" unless phone
+            puts phone.fetch("udid")
+          ')
+          xcodebuild -scheme SimaiSwift -destination "platform=iOS Simulator,id=$simulator_id" \
+            -derivedDataPath /tmp/simai-swift-preview-tests -parallel-testing-enabled NO \
+            -only-testing:SimaiSwiftTests/PreviewPlaybackTests CODE_SIGNING_ALLOWED=NO test -quiet

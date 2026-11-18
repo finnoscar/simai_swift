@@ -23,6 +23,14 @@
       "sha256": "248a2c08db18e5edd6b838261ae848d92bfcd5a0d6a4f77e0d964e8ca5d7e432"
     }
   ],
+  "manual_components": [
+    {
+      "component": "SimaiPreviewTimeline",
+      "source_symbol": "SimaiDetailedTimeline",
+      "source_path": "MaimaiScoreTracker/Views/SimaiChartExperienceView.swift",
+      "adaptations": "Public initializer, standalone contrast and accessibility; no Airmai-specific styling helpers."
+    }
+  ],
   "adaptations": [
     "Public Swift access control for reusable types and their existing members",
     "UIKit touch surface compiled only on UIKit platforms",
