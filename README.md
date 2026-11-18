@@ -35,7 +35,7 @@ Package 使用 Swift tools 5.9 和 Swift 5 语言模式。当前本地验证使�
 也可以在 `Package.swift` 中添加依赖。
 
 ```swift
-.package(url: "https://github.com/finnoscar/simai_swift.git", from: "0.2.0")
+.package(url: "https://github.com/finnoscar/simai_swift.git", from: "0.2.1")
 ```
 
 在目标的 `dependencies` 中添加产品。

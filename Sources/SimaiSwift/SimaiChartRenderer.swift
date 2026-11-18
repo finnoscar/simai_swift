@@ -1617,11 +1617,13 @@ private struct SimaiSlideInteractionGroup {
     let targets: Set<SimaiInputTarget>
     let blocksSkip: Bool
     let pathProgress: Double
+    let requiresContact: Bool
 
-    init(targets: Set<SimaiInputTarget>, blocksSkip: Bool, pathProgress: Double = 0) {
+    init(targets: Set<SimaiInputTarget>, blocksSkip: Bool, pathProgress: Double = 0, requiresContact: Bool = false) {
         self.targets = targets
         self.blocksSkip = blocksSkip
         self.pathProgress = pathProgress
+        self.requiresContact = requiresContact
     }
 }
 
@@ -2158,7 +2160,7 @@ private struct SimaiSlideRuntime {
                     } else if currentOn {
                         runtime.armed[branchIndex] = true
                     }
-                    if !current.blocksSkip, cursor + 1 < groups.count,
+                    if !current.blocksSkip, !current.requiresContact, cursor + 1 < groups.count,
                         !groups[cursor + 1].targets.isDisjoint(with: activeTargets)
                     {
                         runtime.cursors[branchIndex] += 1
@@ -2204,7 +2206,12 @@ private struct SimaiSlideRuntime {
             guard var runtime = slideRuntimes[key], runtime.result == nil,
                 time > runtime.path.endTime + SimaiTiming.slideWindow + SimaiTiming.inputDeliveryGrace
             else { continue }
-            runtime.result = runtime.remainingGroupCount <= 1 ? .good : .miss
+            let canForgiveLastGroup =
+                runtime.remainingGroupCount <= 1
+                && !runtime.groups.indices.contains { branch in
+                    runtime.groups[branch].dropFirst(runtime.cursors[branch]).contains(where: \.requiresContact)
+                }
+            runtime.result = canForgiveLastGroup ? .good : .miss
             runtime.visualProgress = runtime.groups.indices.map { branchIndex in
                 let groups = runtime.groups[branchIndex]
                 let cursor = runtime.cursors[branchIndex]
@@ -2456,6 +2463,8 @@ private struct SimaiSlideRuntime {
         // Slide. The forward window below grows with the finger's real travel, so a
         // fast swipe still catches up without allowing a stationary touch to skip.
         var trackedProgress = previousProgress
+        var nextRequiredContact = groups[runtime.cursors[branchIndex]...].firstIndex(where: \.requiresContact)
+        let firstRequiredContact = nextRequiredContact
         var contactProgress: [Int: Double] = [:]
         var previousPoint: [Int: CGPoint] = [:]
         for sample in recentSamples where sample.sequence <= previousSequence {
@@ -2514,22 +2523,38 @@ private struct SimaiSlideRuntime {
             }
             guard let projection else { continue }
 
-            let projectedProgress = max(progress, Double(projection.progress))
+            var projectedProgress = max(progress, Double(projection.progress))
+            if let requiredIndex = nextRequiredContact {
+                let required = groups[requiredIndex]
+                // Projection can follow a shortcut even when the finger never
+                // reaches C. Inspect the real historical touch so coalesced
+                // callbacks still count a center hit between delivered frames.
+                if projectedProgress + Self.slidePathProgressAllowance >= required.pathProgress,
+                    !required.targets.isDisjoint(with: SimaiInputMapper.targets(at: sample.point))
+                {
+                    projectedProgress = max(projectedProgress, required.pathProgress)
+                    nextRequiredContact = groups[(requiredIndex + 1)...].firstIndex(where: \.requiresContact)
+                }
+                if let nextRequiredContact {
+                    projectedProgress = min(projectedProgress, groups[nextRequiredContact].pathProgress)
+                }
+            }
             contactProgress[sample.id] = projectedProgress
             trackedProgress = max(trackedProgress, projectedProgress)
-            if let last = groups.last, trackedProgress + Self.slidePathCompletionAllowance >= last.pathProgress,
+            if nextRequiredContact == nil, let last = groups.last,
+                trackedProgress + Self.slidePathCompletionAllowance >= last.pathProgress,
                 runtime.branchCompletionTimes[branchIndex] == nil
             {
                 runtime.branchCompletionTimes[branchIndex] = timedSample.time
             }
         }
-        guard trackedProgress > previousProgress else { return }
+        guard trackedProgress > previousProgress || nextRequiredContact != firstRequiredContact else { return }
         runtime.visualProgress[branchIndex] = trackedProgress
 
         // A moving finger on the path is accepted as continuous evidence for
         // all ordered groups it passed. Began/tap frames never enter this path,
         // so touching only the endpoint cannot complete a Slide.
-        while runtime.cursors[branchIndex] < groups.count {
+        while runtime.cursors[branchIndex] < (nextRequiredContact ?? groups.endIndex) {
             let current = groups[runtime.cursors[branchIndex]]
             let allowance =
                 runtime.cursors[branchIndex] == groups.count - 1
@@ -2793,20 +2818,23 @@ private enum SimaiInputMapper {
 
         var fixed: [SimaiSlideInteractionGroup] = []
         var canUseFixed = true
-        for segment in path.segments {
+        for (segmentIndex, segment) in path.segments.enumerated() {
             guard let segmentGroups = segmentGroups(for: segment, mirror: mirror), !segmentGroups.isEmpty else {
                 canUseFixed = false
                 break
             }
+            let hasExplicitCenterTurn =
+                segment.shape == .straight && segment.end.ring == .c && segmentIndex + 1 < path.segments.count
+                && path.segments[segmentIndex + 1].shape == .straight
             for (index, group) in segmentGroups.enumerated() {
                 if index == 0, fixed.last?.targets == group.targets { continue }
-                fixed.append(group)
+                fixed.append(
+                    SimaiSlideInteractionGroup(
+                        targets: group.targets, blocksSkip: path.segments.count == 1 && group.blocksSkip,
+                        requiresContact: hasExplicitCenterTurn && index == segmentGroups.count - 1))
             }
         }
         if canUseFixed, !fixed.isEmpty {
-            if path.segments.count > 1 {
-                fixed = fixed.map { SimaiSlideInteractionGroup(targets: $0.targets, blocksSkip: false) }
-            }
             guard let branch = geometry.branches.first else { return [fixed] }
             return [groupsWithPathProgress(fixed, along: branch)]
         }
@@ -2821,6 +2849,13 @@ private enum SimaiInputMapper {
         let end = segment.end.index
         switch segment.shape {
         case .straight:
+            let centerLeg: [(Int, SimaiSensorRing)] = [(0, .a), (0, .b), (0, .c)]
+            if segment.start.ring == .lane, segment.end.ring == .c {
+                return singleGroups(start: start, direction: 1, specs: centerLeg, mirror: mirror)
+            }
+            if segment.start.ring == .c, segment.end.ring == .lane {
+                return singleGroups(start: end, direction: 1, specs: Array(centerLeg.reversed()), mirror: mirror)
+            }
             switch laneDelta(start, end) {
             case 2:
                 return [
@@ -3041,7 +3076,8 @@ private enum SimaiInputMapper {
             progress = max(minimumProgress, min(progress, 1))
             minimumProgress = progress
             return SimaiSlideInteractionGroup(
-                targets: group.targets, blocksSkip: group.blocksSkip, pathProgress: Double(progress))
+                targets: group.targets, blocksSkip: group.blocksSkip, pathProgress: Double(progress),
+                requiresContact: group.requiresContact)
         }
     }
 

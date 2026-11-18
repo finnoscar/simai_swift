@@ -32,10 +32,12 @@ struct SimaiGameplayRegressionTests {
         input(session, point, event.time + offset + 0.001, .ended)
     }
 
-    static func swipe(_ session: SimaiGameplaySession, _ path: SimaiSlidePath, additionalPaths: [SimaiSlidePath] = [], hz: Int = 120, batch: Int = 1) {
-        let branches = ([path] + additionalPaths).flatMap { SimaiSlidePathGeometry.geometry(for: $0, mirror: .none).branches }
+    static func swipe(_ session: SimaiGameplaySession, _ path: SimaiSlidePath, additionalPaths: [SimaiSlidePath] = [], hz: Int = 120, batch: Int = 1, mirror: SimaiMirrorMode = .none) {
+        var settings = Self.settings
+        settings.mirror = mirror
+        let branches = ([path] + additionalPaths).flatMap { SimaiSlidePathGeometry.geometry(for: $0, mirror: mirror).branches }
         let count = max(1, Int(path.duration * Double(hz)))
-        input(session, branches[0].sample(at: 0).point, path.startTime, .began)
+        input(session, branches[0].sample(at: 0).point, path.startTime, .began, settings: settings)
         var pending: [SimaiTouchContact] = []
         for i in 1...count {
             let progress = Double(i) / Double(count)
@@ -50,7 +52,7 @@ struct SimaiGameplayRegressionTests {
                 session.update(time: time, settings: settings)
             }
         }
-        input(session, branches[0].sample(at: 1).point, path.endTime + 0.001, .ended)
+        input(session, branches[0].sample(at: 1).point, path.endTime + 0.001, .ended, settings: settings)
     }
 
     static func endpointHandoffRegression() throws {
@@ -179,7 +181,70 @@ struct SimaiGameplayRegressionTests {
         print("PASS: indexed f fireworks; all sensor rings; preview/gameplay clocks; HOLD completion; no Miss/ordinary/path duplicates; fixed budget and Reduce Motion")
     }
 
+    static func compactEachAndCenterChainRegression() throws {
+        let beats = try chart("15,1/5,1`5,1/5`7,1h[4:2]5x,1V35[4:1]")
+        expect(beats.events.map(\.location.index) == [1, 5, 1, 5, 1, 5, 1, 5, 7, 1, 5, 1],
+               "Compact notes or slide vertices were split incorrectly")
+        expect(beats.events.map(\.time) == [1, 1, 1.5, 1.5, 2, 2, 2.5, 2.5, 2.5, 3, 3, 3.5],
+               "Compact notes and backticks must preserve the authored timing")
+        expect(beats.eachEventIDs == [0, 1, 2, 3, 9, 10], "Backtick did not suppress EACH for just its beat")
+        expect(beats.events[9].kind == .hold && beats.events[9].duration == 1 && beats.events[10].flags.contains(.ex),
+               "Compact splitting changed a hold duration or moved a modifier")
+        expect(beats.events[11].slidePaths.first?.segments.first?.via?.index == 3,
+               "The two vertices of V must still form one slide")
+
+        let chord = try chart("15")
+        let session = SimaiGameplaySession(chart: chord)
+        expect(session.totalDXScore == 6, "Compact double tap lost a score slot")
+        tap(session, chord.events[0])
+        tap(session, chord.events[1], offset: 0.002)
+        expect(session.dxScore == 6 && session.combo == 2, "Compact double tap did not score both hits")
+        let missed = SimaiGameplaySession(chart: chord)
+        tap(missed, chord.events[0])
+        missed.update(time: 1.25, settings: settings)
+        expect(missed.counts(for: .miss) == 1, "An unplayed compact note should be judged MISS")
+
+        let folded = try chart("3-C-2[4:1]")
+        let event = folded.events[0]
+        let path = event.slidePaths[0]
+        expect(path.segments.map(\.start.ring) == [.lane, .c] && path.segments.map(\.end.ring) == [.c, .lane],
+               "The explicit center must be a real slide vertex")
+        let longer = try chart("3-C-2[4:3]")
+        expect(longer.events[0].slidePaths[0].duration == 1.5, "Lost the final segment's authored duration")
+        let direct = try chart("3-2[4:1]").events[0].slidePaths[0]
+        for mirror in SimaiMirrorMode.allCases {
+            let geometry = SimaiSlidePathGeometry.geometry(for: path, mirror: mirror)
+            let midpoint = geometry.branches[0].sample(at: 0.5).point
+            expect(hypot(midpoint.x, midpoint.y) < 0.000_001, "The star cut across the C turn")
+            let sensors = [SimaiLocation(ring: .a, index: 3), SimaiLocation(ring: .b, index: 3),
+                           SimaiLocation(ring: .c, index: 1),
+                           SimaiLocation(ring: .b, index: 2), SimaiLocation(ring: .a, index: 2)]
+            let expected = sensors.map { Set([SimaiInputTarget.sensor(mirror.map(location: $0))]) }
+            let groups = SimaiInputMapper.slideGroups(for: path, geometry: geometry, mirror: mirror)[0]
+            expect(groups.map(\.targets) == expected,
+                   "The C-turn sensor order differs from the drawn path")
+            expect(groups.map(\.requiresContact) == [false, false, true, false, false],
+                   "Only the explicitly authored center turn should require contact")
+            var playbackSettings = settings
+            playbackSettings.mirror = mirror
+            for batch in [1, 5] {
+                for (route, grade) in [(path, SimaiJudgement.criticalPerfect), (direct, .miss)] {
+                    let session = SimaiGameplaySession(chart: folded)
+                    let head = mirror.map(location: event.location).normalizedPoint()
+                    input(session, head, event.time, .began, settings: playbackSettings)
+                    input(session, head, event.time + 0.001, .ended, settings: playbackSettings)
+                    swipe(session, route, batch: batch, mirror: mirror)
+                    session.update(time: path.endTime + 0.7, settings: playbackSettings)
+                    expect(session.scoreRecords.filter { $0.slot.pathIndex != nil }.map(\.judgement) == [grade],
+                           "Center swipe or shortcut graded incorrectly (\(mirror), batch \(batch), expected \(grade))")
+                }
+            }
+        }
+        print("PASS: compact chord scoring, authored EACH suppression and mirrored C-turn geometry/sensors")
+    }
+
     static func main() async throws {
+        try compactEachAndCenterChainRegression()
         try fireworksRegression()
         try endpointHandoffRegression()
         expect(SimaiJudgement.criticalPerfect.displayTitle == "CRITICAL", "Critical feedback label is no longer compact")
@@ -343,7 +408,7 @@ struct SimaiGameplayRegressionTests {
         print("PASS: cumulative offset and end-of-chart feedback tail")
 
         var trajectories = 0
-        for text in ["1-5[4:1]", "1p5[4:1]", "1pp5[4:1]", "1s5[4:1]", "1z5[4:1]", "1w5[4:1]", "3v2[4:1]", "1-5[4:1]*-7[4:1]"] {
+        for text in ["1-5[4:1]", "1p5[4:1]", "1pp5[4:1]", "1s5[4:1]", "1z5[4:1]", "1w5[4:1]", "3v2[4:1]", "3-C-2[4:1]", "1-5[4:1]*-7[4:1]"] {
             for hz in [60, 120, 240] {
                 for batch in [1, 12] {
                     let c = try chart(text)

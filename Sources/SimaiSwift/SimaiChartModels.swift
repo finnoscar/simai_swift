@@ -371,6 +371,8 @@ public enum SimaiChartParseError: LocalizedError {
 }
 
 public enum SimaiChartParser {
+    private static let slideOperatorCharacters = Set("-<>^vVszwpq")
+
     public static func parse(maidata: String, levelIndex: Int) throws -> SimaiChart {
         let fields = maidataFields(from: maidata)
         let chartKey = "inote_\(levelIndex + 2)"
@@ -381,7 +383,7 @@ public enum SimaiChartParser {
         let defaultBPM = positiveDouble(fields["bpm"]) ?? 120
         let chartNumber = levelIndex + 2
         let firstOffset = finiteDouble(fields["first_\(chartNumber)"]) ?? finiteDouble(fields["first"]) ?? 0
-        let events = parseEvents(source: source, initialBPM: defaultBPM, initialTime: firstOffset)
+        let (events, eachEventIDs) = parseEvents(source: source, initialBPM: defaultBPM, initialTime: firstOffset)
         guard !events.isEmpty else { throw SimaiChartParseError.emptyChart }
 
         let firstTime = events.first?.time ?? 0
@@ -408,11 +410,7 @@ public enum SimaiChartParser {
             eventByID: Dictionary(uniqueKeysWithValues: events.map { ($0.id, $0) }),
             fireworkEvents: events.filter { $0.flags.contains(.fireworks) && !$0.flags.contains(.invalidate) }.sorted {
                 $0.fireworkTime == $1.fireworkTime ? $0.id < $1.id : $0.fireworkTime < $1.fireworkTime
-            },
-            eachEventIDs: Set(
-                Dictionary(grouping: events, by: { Int(($0.time * 10_000).rounded()) }).values.filter { $0.count > 1 }
-                    .flatMap { $0.map(\.id) }),
-            maximumEventDuration: events.map { max($0.endTime - $0.time, 0) }.max() ?? 0,
+            }, eachEventIDs: eachEventIDs, maximumEventDuration: events.map { max($0.endTime - $0.time, 0) }.max() ?? 0,
             timelineDensity: timelineDensity, timelineNoteBuckets: timelineNoteBuckets)
     }
 
@@ -440,7 +438,9 @@ public enum SimaiChartParser {
         return fields
     }
 
-    private static func parseEvents(source: String, initialBPM: Double, initialTime: TimeInterval) -> [SimaiNoteEvent] {
+    private static func parseEvents(source: String, initialBPM: Double, initialTime: TimeInterval) -> (
+        events: [SimaiNoteEvent], eachEventIDs: Set<Int>
+    ) {
         let cleaned = source.components(separatedBy: "\n").map { line -> String in
             if let comment = line.range(of: "||") { return String(line[..<comment.lowerBound]) }
             return line
@@ -455,6 +455,7 @@ public enum SimaiChartParser {
         // across songs.
         var currentTime = initialTime
         var rawEvents: [SimaiNoteEvent] = []
+        var eachEventIDs: Set<Int> = []
         var eventID = 0
 
         while cursor < cleaned.endIndex {
@@ -503,21 +504,27 @@ public enum SimaiChartParser {
 
             let statementEnd = nextTopLevelComma(in: cleaned, from: cursor)
             let statement = cleaned[cursor..<statementEnd]
-            for component in splitTopLevel(statement, separators: ["/", "`"]) {
-                guard
-                    let parsed = parseComponent(
-                        component, time: currentTime, bpm: bpm, subdivision: subdivision, startingID: eventID)
-                else { continue }
-                rawEvents.append(contentsOf: parsed)
-                eventID += parsed.count
+            let (components, suppressesEach) = splitBeat(statement)
+            let firstEventID = eventID
+            for component in components {
+                for note in compactNoteComponents(component) {
+                    guard
+                        let parsed = parseComponent(
+                            note, time: currentTime, bpm: bpm, subdivision: subdivision, startingID: eventID)
+                    else { continue }
+                    rawEvents.append(contentsOf: parsed)
+                    eventID += parsed.count
+                }
             }
+            if !suppressesEach, eventID - firstEventID > 1 { eachEventIDs.formUnion(firstEventID..<eventID) }
             cursor = statementEnd
         }
 
-        return rawEvents.sorted {
+        let sortedEvents = rawEvents.sorted {
             if $0.time == $1.time { return $0.id < $1.id }
             return $0.time < $1.time
         }
+        return (sortedEvents, eachEventIDs)
     }
 
     private static func parseComponent(
@@ -623,21 +630,28 @@ public enum SimaiChartParser {
             guard let found = operatorAtOrAfter(in: text, from: cursor, operators: operators) else { break }
             let symbol = found.symbol
             var valueCursor = found.range.upperBound
-            var digits = ""
-            let digitLimit = symbol == "V" ? 2 : 1
-            while valueCursor < text.endIndex, digits.count < digitLimit, text[valueCursor].isNumber {
-                digits.append(text[valueCursor])
-                valueCursor = text.index(after: valueCursor)
-            }
-            guard let last = digits.last?.wholeNumberValue else {
-                cursor = found.range.upperBound
-                continue
+            let end: SimaiLocation
+            var via: SimaiLocation?
+            if symbol == "-", let center = SimaiLocation.parse(text[valueCursor...]), center.location.ring == .c {
+                end = center.location
+                valueCursor = text.index(valueCursor, offsetBy: center.consumed)
+            } else {
+                var digits = ""
+                let digitLimit = symbol == "V" ? 2 : 1
+                while valueCursor < text.endIndex, digits.count < digitLimit, text[valueCursor].isNumber {
+                    digits.append(text[valueCursor])
+                    valueCursor = text.index(after: valueCursor)
+                }
+                guard let last = digits.last?.wholeNumberValue else {
+                    cursor = found.range.upperBound
+                    continue
+                }
+                if symbol == "V", digits.count == 2 {
+                    via = SimaiLocation(ring: .lane, index: digits.first?.wholeNumberValue ?? last)
+                }
+                end = SimaiLocation(ring: .lane, index: last)
             }
 
-            let via =
-                symbol == "V" && digits.count == 2
-                ? SimaiLocation(ring: .lane, index: digits.first?.wholeNumberValue ?? last) : nil
-            let end = SimaiLocation(ring: .lane, index: last)
             let bracket = bracketContent(in: text, from: valueCursor)
             if let bracket {
                 let timing = parseSlideTiming(bracket.content, bpm: bpm)
@@ -714,7 +728,9 @@ public enum SimaiChartParser {
     private static func bracketContent(in text: String, from start: String.Index) -> (
         content: String, range: Range<String.Index>
     )? {
+        // A later segment can carry the only duration in a chained slide.
         guard start < text.endIndex, let open = text[start...].firstIndex(of: "["),
+            !text[start..<open].contains(where: { slideOperatorCharacters.contains($0) }),
             let close = text[open...].firstIndex(of: "]")
         else { return nil }
         return (String(text[text.index(after: open)..<close]), open..<text.index(after: close))
@@ -737,20 +753,49 @@ public enum SimaiChartParser {
         }
     }
 
-    private static func splitTopLevel(_ text: Substring, separators: Set<Character>) -> [Substring] {
+    private static func splitBeat(_ text: Substring) -> (components: [Substring], suppressesEach: Bool) {
         var result: [Substring] = []
+        var suppressesEach = false
         var start = text.startIndex
         var depth = 0
         for index in text.indices {
             let character = text[index]
             if character == "[" || character == "(" || character == "{" { depth += 1 }
             if character == "]" || character == ")" || character == "}" { depth = max(depth - 1, 0) }
-            if separators.contains(character) && depth == 0 {
+            if depth == 0, character == "/" || character == "`" {
+                if character == "`" { suppressesEach = true }
                 result.append(text[start..<index])
                 start = text.index(after: index)
             }
         }
         result.append(text[start..<text.endIndex])
+        return (result, suppressesEach)
+    }
+
+    private static func compactNoteComponents(_ text: Substring) -> [Substring] {
+        guard let first = text.firstIndex(where: { !$0.isWhitespace }),
+            let location = SimaiLocation.parse(text[first...])
+        else { return [text] }
+
+        var result: [Substring] = []
+        var start = first
+        var cursor = text.index(first, offsetBy: location.consumed)
+        var depth = 0
+        while cursor < text.endIndex {
+            let character = text[cursor]
+            if depth == 0 {
+                // Slide destinations (including the two vertices of V) are not note heads.
+                if slideOperatorCharacters.contains(character) || character == "*" { break }
+                if let lane = character.wholeNumberValue, (1...8).contains(lane) {
+                    result.append(text[start..<cursor])
+                    start = cursor
+                }
+            }
+            if character == "[" || character == "(" || character == "{" { depth += 1 }
+            if character == "]" || character == ")" || character == "}" { depth = max(depth - 1, 0) }
+            cursor = text.index(after: cursor)
+        }
+        result.append(text[start...])
         return result
     }
 

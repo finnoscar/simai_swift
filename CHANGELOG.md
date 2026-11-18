@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 — 2026-11-18
+
+- Parse compact chords such as `15` as separate notes on the same beat, with independent input and scores.
+- Preserve both legs and the authored timing of explicit center turns such as `3-C-2[4:1]`. The guide star and input route now agree, and a shortcut that misses C cannot clear the slide.
+- Honor backtick notation (for example, ``1`5``) without applying ordinary EACH styling or changing note timing and scoring.
+- Compare the revised parser and slide judgement against Airmai's engine in the source parity check.
+
 ## 0.2.0 — 2026-11-18
 
 - Add Airmai’s preview timeline to `SimaiPlayerView` and expose `SimaiPreviewTimeline` for custom hosts.
